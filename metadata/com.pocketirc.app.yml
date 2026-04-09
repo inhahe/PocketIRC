@@ -1,0 +1,56 @@
+# F-Droid metadata for Pocket IRC.
+#
+# When submitting to https://gitlab.com/fdroid/fdroiddata, copy this file to
+# `metadata/com.pocketirc.app.yml` in that repository (same path), commit it,
+# and open a merge request. The file lives here in-tree as a single source of
+# truth so changes can be reviewed alongside the code.
+
+Categories:
+  - Internet
+License: MIT
+AuthorName: Pocket IRC contributors
+SourceCode: https://github.com/inhahe/pocketirc
+IssueTracker: https://github.com/inhahe/pocketirc/issues
+
+AutoName: Pocket IRC
+
+Summary: Modern IRC client for Android
+
+Description: |-
+    Pocket IRC is a small, fast, modern IRC client for Android phones and
+    tablets, written in Kotlin with Jetpack Compose and Material 3.
+
+    Features:
+
+    * Multi-network with auto-reconnect, per-server token-bucket rate limiting
+    * SASL PLAIN, server PASS, IRCv3 message-tags, MONITOR / ISON notify list
+    * Mention, PM, notice, and notify-list system notifications with inline reply
+    * Tablet/landscape persistent split layout (server tree + chat + nick list)
+    * Searchable, exportable per-buffer history persisted in Room
+    * Channel info screen with mode flags, ban / except / invite / quiet lists
+    * /list channel browser, /who, /whois reply routing back to the originating buffer
+    * /on event hooks (chanmsg, privmsg, join, part, quit, kick, nick, etc.)
+      with nick mask, channel, network, and text-pattern filters and
+      {var}/$var substitution. Supports -d (notification), -s (sound),
+      -x (suppress default), -p (persist across restarts).
+    * Editable startup script run at app launch
+    * mIRC color and formatting input via long-press send / leading icon
+    * IPv4/IPv6 family pinning per endpoint with custom TLS hostname verification
+    * No analytics, no tracking, no Google Play Services
+
+RepoType: git
+Repo: https://github.com/REPLACE_ME/pocketirc.git
+
+Builds:
+  - versionName: '0.7.0'
+    versionCode: 1
+    commit: v0.7.0
+    subdir: app
+    gradle:
+      - yes
+    output: build/outputs/apk/release/app-release-unsigned.apk
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: '0.7.0'
+CurrentVersionCode: 1

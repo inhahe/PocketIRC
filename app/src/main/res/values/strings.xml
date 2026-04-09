@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Pocket IRC</string>
+    <string name="notif_channel_service">IRC Connection</string>
+    <string name="notif_channel_mentions">Mentions &amp; PMs</string>
+    <string name="notif_channel_notify">Watched nicks online/offline</string>
+    <string name="service_running">Pocket IRC connected</string>
+</resources>

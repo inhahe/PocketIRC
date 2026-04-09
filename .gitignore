@@ -1,0 +1,25 @@
+.gradle/
+build/
+**/build/
+.idea/
+local.properties
+*.iml
+captures/
+.cxx/
+.kotlin/
+
+# Signing — never commit keystores or credentials
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs / crash dumps
+*.log
+*.tmp
+hs_err_pid*
