@@ -363,10 +363,10 @@ class ConnectionManager(history: ChatLineRepository? = null) {
                         // Run /on hooks first so a -x hook can suppress the
                         // default ingest (and thus the rendering + mention
                         // notification + nick-list bump for that event).
-                        val suppressed = dispatchOnHooks(config, ev)
-                        if (!suppressed) {
+                        val outcome = dispatchOnHooks(config, ev)
+                        if (!outcome.suppress) {
                             val notify = store.ingest(ev, ourNick = resolveIdentity(config).nick)
-                            if (notify && ev is IrcEvent.Message) {
+                            if (notify && !outcome.quiet && ev is IrcEvent.Message) {
                                 if (ev.fromHistory) {
                                     // Replay mention — buffer for debounced
                                     // threshold-aware delivery so reconnecting
@@ -420,11 +420,14 @@ class ConnectionManager(history: ChatLineRepository? = null) {
 
     /** Map an IrcEvent to /on event types and dispatch through [onHooks].
      *  Returns true if any matching hook asked to suppress default handling. */
-    private fun dispatchOnHooks(config: ServerConfig, ev: IrcEvent): Boolean {
-        val exec = onHookExecutor ?: return false
+    data class HookOutcome(val suppress: Boolean, val quiet: Boolean)
+
+    private fun dispatchOnHooks(config: ServerConfig, ev: IrcEvent): HookOutcome {
+        val exec = onHookExecutor ?: return HookOutcome(false, false)
         val net = config.name
         val notify = onHookNotifier
         var suppress = false
+        var quiet = false
         fun fire(eventName: String, vars: Map<String, String>) {
             val target = vars["target"]?.takeIf { it.isNotBlank() }
                 ?: vars["channel"]?.takeIf { it.isNotBlank() }
@@ -438,6 +441,7 @@ class ConnectionManager(history: ChatLineRepository? = null) {
                 notifier = notify,
             )
             if (r.suppress) suppress = true
+            if (r.quiet) quiet = true
         }
         when (ev) {
             is IrcEvent.Connected -> fire(OnHookEvents.CONNECT, mapOf("server" to net))
@@ -480,7 +484,7 @@ class ConnectionManager(history: ChatLineRepository? = null) {
             )
             else -> { /* Status, Typing, Raw, Numeric handled elsewhere */ }
         }
-        return suppress
+        return HookOutcome(suppress, quiet)
     }
 
     fun remove(id: String, reason: String? = null) {

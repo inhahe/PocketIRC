@@ -840,6 +840,7 @@ class IrcViewModel(app: Application) : AndroidViewModel(app) {
                             if (h.desktop) add("-d")
                             h.channel?.let { add("-c $it") }
                             if (h.suppressDefault) add("-x")
+                            if (h.suppressNotification) add("-q")
                             if (h.persistent) add("(persisted)")
                             add("→ ${h.action}")
                         }

@@ -72,7 +72,7 @@ class OnHookEngine {
      */
     /** Result of [dispatch]: how many hooks fired and whether any of them
      *  asked to suppress the default handling of the event. */
-    data class Result(val fired: Int, val suppress: Boolean)
+    data class Result(val fired: Int, val suppress: Boolean, val quiet: Boolean = false)
 
     fun dispatch(
         event: String,
@@ -83,6 +83,7 @@ class OnHookEngine {
     ): Result {
         var fired = 0
         var suppress = false
+        var quiet = false
         for (h in _hooks.value) {
             try {
             if (h.event != event) continue
@@ -121,13 +122,14 @@ class OnHookEngine {
                 executor(expand(h.action, merged))
             }
             if (h.suppressDefault) suppress = true
+            if (h.suppressNotification) quiet = true
             fired++
             } catch (t: Throwable) {
                 com.pocketirc.app.error.ErrorReporter.report(
                     t, "OnHookEngine hook=${h.name} event=$event")
             }
         }
-        return Result(fired, suppress)
+        return Result(fired, suppress, quiet)
     }
 
     companion object {

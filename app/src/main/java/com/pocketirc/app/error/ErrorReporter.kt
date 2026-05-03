@@ -3,8 +3,6 @@ package com.pocketirc.app.error
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import java.io.PrintWriter
-import java.io.StringWriter
 
 /**
  * Process-wide singleton that collects reportable errors and surfaces them
@@ -27,12 +25,10 @@ object ErrorReporter {
         val throwable: Throwable,
         val timestamp: Long = System.currentTimeMillis(),
     ) {
-        /** A multi-line trace string suitable for embedding in an issue body. */
-        fun fullTrace(): String {
-            val sw = StringWriter()
-            throwable.printStackTrace(PrintWriter(sw))
-            return sw.toString()
-        }
+        /** A multi-line trace string suitable for embedding in an issue body.
+         *  Unlike [Throwable.printStackTrace], this never abbreviates frames
+         *  with "... N more". */
+        fun fullTrace(): String = fullStackTrace(throwable)
     }
 
     private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 16)
@@ -51,5 +47,25 @@ object ErrorReporter {
         // anyone running a debug build.
         android.util.Log.e("PocketIRC", "[$context] $title", throwable)
         return ev
+    }
+}
+
+/**
+ * Formats the full exception chain without the "... N more" abbreviation
+ * that [Throwable.printStackTrace] uses. Every frame is always printed.
+ */
+fun fullStackTrace(throwable: Throwable): String = buildString {
+    var current: Throwable? = throwable
+    var prefix = ""
+    while (current != null) {
+        append(prefix)
+        append(current.javaClass.name)
+        current.message?.let { append(": ").append(it) }
+        append('\n')
+        for (frame in current.stackTrace) {
+            append("\tat ").append(frame).append('\n')
+        }
+        current = current.cause
+        if (current != null) prefix = "Caused by: "
     }
 }

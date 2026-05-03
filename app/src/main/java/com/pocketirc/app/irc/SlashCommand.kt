@@ -111,6 +111,7 @@ private fun parseOn(args: String): ParsedInput {
     var desktop = false
     var alertChannel: String? = null
     var suppress = false
+    var quiet = false
     val positional = mutableListOf<String>()
     while (i < toks.size) {
         when (val t = toks[i]) {
@@ -125,6 +126,7 @@ private fun parseOn(args: String): ParsedInput {
             "-d" -> { desktop = true; i++ }
             "-ac" -> { alertChannel = toks.getOrNull(i + 1)?.lowercase(); i += 2 }
             "-x" -> { suppress = true; i++ }
+            "-q" -> { quiet = true; i++ }
             else -> {
                 if (t.startsWith("-")) return ParsedInput.Error("/on: unknown flag $t")
                 // First non-flag is event; rest is action.
@@ -171,6 +173,7 @@ private fun parseOn(args: String): ParsedInput {
             desktop = desktop,
             channel = alertChannel,
             suppressDefault = suppress,
+            suppressNotification = quiet,
         )
     )
 }

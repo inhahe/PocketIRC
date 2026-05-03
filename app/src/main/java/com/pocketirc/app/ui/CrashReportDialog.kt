@@ -23,7 +23,7 @@ import androidx.compose.ui.window.Dialog
  * Proton alias have been created — search-and-replace once they are.
  */
 private const val GITHUB_REPO = "inhahe/pocketirc"
-private const val CONTACT_EMAIL = "inhahe.backstage595@slmails.com"
+private const val CONTACT_EMAIL = "inhahe6@gmail.com"
 
 /**
  * Dialog shown when the user has agreed to look at a crash or error report.

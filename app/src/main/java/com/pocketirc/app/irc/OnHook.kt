@@ -31,6 +31,9 @@ data class OnHook(
     val channel: String? = null,
     /** -x: suppress default handling — the event is dropped before ingest. */
     val suppressDefault: Boolean = false,
+    /** -q: suppress only the mention/PM/notice notification. The event still
+     *  ingests normally (rendered into its buffer, unread counter, etc.). */
+    val suppressNotification: Boolean = false,
 )
 
 /** Canonical event identifiers used by [OnHookEngine.dispatch]. */

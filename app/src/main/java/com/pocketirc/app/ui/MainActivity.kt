@@ -12,6 +12,16 @@ import androidx.compose.ui.Modifier
 import com.pocketirc.app.service.IrcService
 
 class MainActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        IrcService.instance?.manager?.store?.foreground = true
+    }
+
+    override fun onStop() {
+        IrcService.instance?.manager?.store?.foreground = false
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 

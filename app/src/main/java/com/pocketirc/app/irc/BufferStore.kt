@@ -73,6 +73,9 @@ class BufferStore(private val history: ChatLineRepository? = null) {
 
     private val ids = AtomicLong(0)
     @Volatile var activeBufferId: String? = null
+    /** True while the UI is in the foreground. The active-buffer notification
+     *  suppression only applies when the app is actually visible. */
+    @Volatile var foreground: Boolean = false
 
     /** Returns true if the line should fire a mention notification. */
     fun ingest(event: IrcEvent, ourNick: String): Boolean {
@@ -174,7 +177,7 @@ class BufferStore(private val history: ChatLineRepository? = null) {
                 // (event.fromHistory) get routed through a debounced batch
                 // window that suppresses or releases them depending on the
                 // configured threshold.
-                highlight && activeBufferId != "${event.serverId}::$bufferName"
+                highlight && !(foreground && activeBufferId == "${event.serverId}::$bufferName")
             }
             is IrcEvent.Typing -> {
                 val isPm = !event.target.startsWith("#") && !event.target.startsWith("&")
@@ -324,7 +327,7 @@ class BufferStore(private val history: ChatLineRepository? = null) {
         serverId: String, name: String, line: ChatLine, highlight: Boolean,
     ) {
         update(serverId, name) { b ->
-            val active = activeBufferId == b.id
+            val active = foreground && activeBufferId == b.id
             // LRU bump for recent speakers — only count real chatter, not joins/system noise.
             val newSpeakers = if (line.sender != null &&
                 line.kind in setOf(ChatLine.Kind.MESSAGE, ChatLine.Kind.ACTION)) {

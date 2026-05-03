@@ -3,8 +3,6 @@ package com.pocketirc.app.error
 import android.content.Context
 import android.os.Build
 import java.io.File
-import java.io.PrintWriter
-import java.io.StringWriter
 
 /**
  * Persists uncaught fatal crashes to a file in app-private storage so the
@@ -41,8 +39,6 @@ object CrashFile {
     }
 
     private fun writeCrash(context: Context, appVersion: String, throwable: Throwable) {
-        val sw = StringWriter()
-        throwable.printStackTrace(PrintWriter(sw))
         val body = buildString {
             append(System.currentTimeMillis()).append('\n')
             append(appVersion).append('\n')
@@ -50,7 +46,7 @@ object CrashFile {
                 .append(" Android ").append(Build.VERSION.RELEASE)
                 .append(" (SDK ").append(Build.VERSION.SDK_INT).append(")\n")
             append('\n')
-            append(sw.toString())
+            append(fullStackTrace(throwable))
         }
         File(context.filesDir, FILE_NAME).writeText(body)
     }

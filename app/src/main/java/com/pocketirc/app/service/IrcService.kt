@@ -53,11 +53,25 @@ class IrcService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         repo = ServerRepository(applicationContext)
         history = ChatLineRepository(PocketIrcDatabase.get(applicationContext).chatLines())
         settingsRepo = SettingsRepository(applicationContext)
         manager = ConnectionManager(history)
-        startForeground(NOTIF_ID, buildOngoingNotification())
+        try {
+            startForeground(NOTIF_ID, buildOngoingNotification())
+        } catch (e: Exception) {
+            // Android 12+ throws ForegroundServiceStartNotAllowedException when
+            // the system restarts us from background (START_STICKY). Nothing we
+            // can do — the service will run without a foreground notification
+            // until the user opens the app, at which point MainActivity will
+            // re-issue startForegroundService which has foreground privilege.
+            if (android.os.Build.VERSION.SDK_INT >= 31 &&
+                e.javaClass.simpleName == "ForegroundServiceStartNotAllowedException") {
+                android.util.Log.w("PocketIRC",
+                    "Could not start foreground — running in background", e)
+            } else throw e
+        }
 
         // Mirror current settings into a volatile field so notification posting
         // can read them synchronously without suspending. Also push the
@@ -364,7 +378,7 @@ class IrcService : LifecycleService() {
             .build()
 
         val builder = NotificationCompat.Builder(this, PocketIrcApp.CHANNEL_MENTIONS)
-            .setContentTitle("${msg.sender} in ${msg.target}")
+            .setContentTitle(if (isPm) msg.sender else "${msg.sender} in ${msg.target}")
             .setContentText(msg.text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(msg.text))
             .setSmallIcon(android.R.drawable.stat_notify_chat)
@@ -405,10 +419,12 @@ class IrcService : LifecycleService() {
 
     override fun onDestroy() {
         manager.shutdownAll()
+        if (instance === this) instance = null
         super.onDestroy()
     }
 
     companion object {
+        @Volatile var instance: IrcService? = null
         const val NOTIF_ID = 1001
         const val ACTION_REPLY = "com.pocketirc.app.action.REPLY"
         const val EXTRA_SERVER_ID = "com.pocketirc.app.extra.SERVER_ID"

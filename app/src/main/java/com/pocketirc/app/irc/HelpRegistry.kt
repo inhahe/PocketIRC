@@ -235,6 +235,8 @@ object HelpRegistry {
                 "              or any custom channel you've created in Settings\n" +
                 "  -x          suppress default handling — drop the event so it\n" +
                 "              isn't rendered, doesn't notify, doesn't bump unread\n" +
+                "  -q          quiet: suppress only the mention/PM notification;\n" +
+                "              the event still ingests into its buffer normally\n" +
                 "Action variables: {nick} {user} {channel} {target} {text} " +
                 "{server} {oldnick} {newnick} {reason}\n" +
                 "List:    /on -l [event]\n" +
