@@ -247,6 +247,10 @@ class ConnectionManager(history: ChatLineRepository? = null) {
         return EffectiveIdentity(nicks = nicks, realName = realName, userName = userName)
     }
 
+    /** Per-server event-collector jobs started by [register], cancelled by [remove]. */
+    private val eventCollectors =
+        java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+
     private val replayBuffer =
         java.util.concurrent.ConcurrentHashMap<String, MutableList<IrcEvent.Message>>()
     private val replayDrainJobs =
@@ -290,7 +294,12 @@ class ConnectionManager(history: ChatLineRepository? = null) {
         if (_connections.value.containsKey(config.id)) return
         val conn = IrcConnection(config) { cfg -> resolveIdentity(cfg) }
         _connections.value = _connections.value + (config.id to conn)
-        scope.launch {
+        // Tracked so [remove] can cancel it. conn.events is a SharedFlow and
+        // never completes, so an uncancelled collector outlives the connection
+        // it was created for — and re-registering the same id (as
+        // cycleEndpoint does via remove+register) would stack another one.
+        eventCollectors[config.id]?.cancel()
+        eventCollectors[config.id] = scope.launch {
             conn.events.collect { ev ->
                 try { processEvent(config, conn, ev) } catch (t: Throwable) {
                     com.pocketirc.app.error.ErrorReporter.report(
@@ -489,6 +498,7 @@ class ConnectionManager(history: ChatLineRepository? = null) {
 
     fun remove(id: String, reason: String? = null) {
         _connections.value[id]?.disconnect(reason)
+        eventCollectors.remove(id)?.cancel()
         _connections.value = _connections.value - id
         _connectedIds.value = _connectedIds.value - id
         _networkNames.value = _networkNames.value - id

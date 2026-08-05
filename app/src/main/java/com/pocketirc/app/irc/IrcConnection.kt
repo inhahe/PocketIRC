@@ -60,6 +60,28 @@ class IrcConnection(
     val events: SharedFlow<IrcEvent> = _events
 
     private var client: Client? = null
+
+    /**
+     * The listener registered on [client]. Kept so the client can be retired
+     * (silenced) before shutdown — see [retireClient].
+     */
+    private var clientListener: KitchenSinkListener? = null
+
+    /**
+     * Silence and shut down the current client, if any.
+     *
+     * Order matters: the listener is deactivated BEFORE shutdown, because
+     * KICL fires a connection-ended event as part of shutting down. If that
+     * reached the sink it would look like an unexpected disconnect and
+     * schedule a competing reconnect.
+     */
+    private fun retireClient(reason: String) {
+        val old = client ?: return
+        clientListener?.active = false
+        clientListener = null
+        client = null
+        runCatching { old.shutdown(reason) }
+    }
     @Volatile var endpointIndex: Int = 0
         private set
     private var attempt: Int = 0
@@ -210,6 +232,14 @@ class IrcConnection(
             sink.trySend(IrcEvent.Disconnected(config.id, "No endpoints configured"))
             return
         }
+        // Retire any previous client before dialing a new one. Every Client
+        // carries its own KitchenSinkListener registered against the shared
+        // [sink], so an orphaned-but-still-connected Client keeps delivering a
+        // full duplicate copy of every message. Any path that dials while a
+        // client is live (/nextserver, /failover, a manual /connect, a
+        // reconnect that races a late-arriving Disconnected event) would
+        // otherwise leak one.
+        retireClient("Reconnecting")
         val ep = config.endpoints[endpointIndex % config.endpoints.size]
         sink.trySend(
             IrcEvent.Status(
@@ -294,14 +324,24 @@ class IrcConnection(
                     .then()
                 .build()
 
+            // Disable KICL's automatic WHO queries. KICL sends WHO per
+            // channel every 5 s until a full reply arrives; on networks that
+            // rate-limit WHO this creates an infinite flood. PocketIRC only
+            // needs nick names (populated by NAMES/353 on join) — not the
+            // hostmask/account data that WHO provides.
+            (c as? Client.WithManagement)?.actorTracker
+                ?.setQueryChannelInformation(false)
+
             config.sasl?.let { sasl ->
                 c.authManager.addProtocol(SaslPlain(c, sasl.username, sasl.password))
             }
-            c.eventManager.registerEventListener(KitchenSinkListener(config.id, sink))
+            val listener = KitchenSinkListener(config.id, sink)
+            c.eventManager.registerEventListener(listener)
             // KICL auto-negotiates IRCv3 message-tags if the server advertises
             // it during CAP LS, so no explicit request is needed here.
             c.connect()
             client = c
+            clientListener = listener
         } catch (t: Throwable) {
             sink.trySend(IrcEvent.Disconnected(config.id, t.message ?: t.javaClass.simpleName))
         }
@@ -476,8 +516,7 @@ class IrcConnection(
         quitRequested = true
         reconnectJob?.cancel()
         isonJob?.cancel()
-        client?.shutdown(reason ?: "Pocket IRC")
-        client = null
+        retireClient(reason ?: "Pocket IRC")
     }
 
     /**

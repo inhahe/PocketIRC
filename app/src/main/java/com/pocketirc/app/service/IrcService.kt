@@ -417,6 +417,17 @@ class IrcService : LifecycleService() {
         } catch (_: SecurityException) { /* POST_NOTIFICATIONS not granted */ }
     }
 
+    /**
+     * Called when the user swipes the app from the task manager. Stop the
+     * service so IRC connections are torn down and notifications cease.
+     * Without this, the foreground service survives the swipe and keeps
+     * producing notifications indefinitely.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        stopSelf()
+    }
+
     override fun onDestroy() {
         manager.shutdownAll()
         if (instance === this) instance = null

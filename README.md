@@ -8,9 +8,12 @@ Kotlin with Jetpack Compose and Material 3.
 * Multi-network with auto-reconnect, per-server token-bucket rate limiting
 * App-wide default identity (nicks, real name, username) with per-network overrides
 * SASL PLAIN, server PASS, IRCv3 message-tags, MONITOR / ISON notify list
-* Mention, PM, notice, and notify-list system notifications with inline reply,
-  routed through any number of user-defined notification channels with
-  configurable sound and other per-channel properties
+* Mention, PM, and notice system notifications with inline reply — respond
+  directly from the notification without opening the app — plus notify-list
+  online/offline notifications
+* `/alert` and `/on -d` hook notifications routed through any number of
+  user-defined notification channels, each with configurable sound, vibration,
+  lights, and badge
 * Tablet/landscape persistent split layout (server tree + chat + nick list)
 * Searchable, exportable per-buffer history persisted in Room
 * Channel info screen with mode flags, ban / except / invite / quiet lists

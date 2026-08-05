@@ -32,6 +32,25 @@ class KitchenSinkListener(
     private val sink: Channel<IrcEvent>,
 ) {
     /**
+     * Cleared by [IrcConnection] when the owning Client is retired, before it
+     * is shut down. A retired listener must go silent: MBassador keeps it
+     * registered on the dead Client's event manager, and KICL fires a
+     * connection-ended event during shutdown. Forwarding that event would
+     * re-enter IrcConnection.onDisconnected() and schedule yet another
+     * reconnect for a client we deliberately replaced — a reconnect storm.
+     *
+     * It also backstops the duplicate-message bug this guard was added for:
+     * even if a Client somehow outlives its retirement, it can no longer
+     * push a second copy of every message into the shared sink.
+     */
+    @Volatile
+    var active: Boolean = true
+
+    private fun send(ev: IrcEvent) {
+        if (active) sink.trySend(ev)
+    }
+
+    /**
      * Resolves a message's effective timestamp and historical-replay flag.
      *
      * Reads the IRCv3 `time` tag (the "server-time" cap, used by both ZNC
@@ -120,19 +139,31 @@ class KitchenSinkListener(
 
     @Handler
     fun onConnected(e: ClientNegotiationCompleteEvent) {
-        sink.trySend(IrcEvent.Connected(serverId))
+        send(IrcEvent.Connected(serverId))
     }
 
     @Handler
     fun onDisconnected(e: ClientConnectionEndedEvent) {
+        // Take KICL's own reconnect engine out of the picture. KICL defaults
+        // attemptReconnect to true, so without this it silently revives THIS
+        // Client while IrcConnection.onDisconnected() independently dials a
+        // brand-new Client. Both stay alive, both keep a KitchenSinkListener
+        // registered against the same sink, and every incoming message is
+        // delivered once per surviving client — the connection count (and the
+        // duplicate count) doubles on each outage: 1 → 2 → 4 → 8.
+        //
+        // IrcConnection owns reconnect policy exclusively: exponential backoff
+        // with jitter, endpoint cycling, nick fallback, and permanent-failure
+        // detection. None of that exists in KICL's version.
+        e.setAttemptReconnect(false)
         val reason = e.cause.map { it.message ?: it.javaClass.simpleName }.orElse(null)
-        sink.trySend(IrcEvent.Disconnected(serverId, reason))
+        send(IrcEvent.Disconnected(serverId, reason))
     }
 
     @Handler
     fun onChannelMessage(e: ChannelMessageEvent) {
         val (ts, fromHistory) = resolveMessageTime(e)
-        sink.trySend(
+        send(
             IrcEvent.Message(
                 serverId = serverId,
                 target = e.channel.name,
@@ -149,7 +180,7 @@ class KitchenSinkListener(
     @Handler
     fun onPrivateMessage(e: PrivateMessageEvent) {
         val (ts, fromHistory) = resolveMessageTime(e)
-        sink.trySend(
+        send(
             IrcEvent.Message(
                 serverId = serverId,
                 target = e.actor.nick,   // PM buffer keyed by sender nick
@@ -164,7 +195,7 @@ class KitchenSinkListener(
     @Handler
     fun onChannelNotice(e: ChannelNoticeEvent) {
         val (ts, fromHistory) = resolveMessageTime(e)
-        sink.trySend(
+        send(
             IrcEvent.Message(
                 serverId = serverId,
                 target = e.channel.name,
@@ -180,7 +211,7 @@ class KitchenSinkListener(
     @Handler
     fun onPrivateNotice(e: PrivateNoticeEvent) {
         val (ts, fromHistory) = resolveMessageTime(e)
-        sink.trySend(
+        send(
             IrcEvent.Message(
                 serverId = serverId,
                 target = e.actor.nick,
@@ -195,29 +226,29 @@ class KitchenSinkListener(
 
     @Handler
     fun onJoin(e: ChannelJoinEvent) {
-        sink.trySend(IrcEvent.Joined(serverId, e.channel.name, e.actor.nick))
+        send(IrcEvent.Joined(serverId, e.channel.name, e.actor.nick))
     }
 
     @Handler
     fun onPart(e: ChannelPartEvent) {
-        sink.trySend(IrcEvent.Parted(serverId, e.channel.name, e.actor.nick))
+        send(IrcEvent.Parted(serverId, e.channel.name, e.actor.nick))
     }
 
     @Handler
     fun onTopic(e: ChannelTopicEvent) {
         val topic = e.newTopic.value.orElse("")
         val setter = e.newTopic.setter.map { it.name.substringBefore('!') }.orElse(null)
-        sink.trySend(IrcEvent.TopicChanged(serverId, e.channel.name, topic, setter))
+        send(IrcEvent.TopicChanged(serverId, e.channel.name, topic, setter))
     }
 
     @Handler
     fun onQuit(e: UserQuitEvent) {
-        sink.trySend(IrcEvent.Quit(serverId, e.user.nick, e.message))
+        send(IrcEvent.Quit(serverId, e.user.nick, e.message))
     }
 
     @Handler
     fun onNickChange(e: UserNickChangeEvent) {
-        sink.trySend(IrcEvent.NickChanged(serverId, e.oldUser.nick, e.newUser.nick))
+        send(IrcEvent.NickChanged(serverId, e.oldUser.nick, e.newUser.nick))
     }
 
     @Handler
@@ -225,7 +256,7 @@ class KitchenSinkListener(
         val reason = runCatching { e.message }.getOrNull()
         // e.user is the kicker (KICL exposes the actor as a User on this event);
         // e.target is the kicked user.
-        sink.trySend(IrcEvent.Kicked(serverId, e.channel.name, e.target.nick, e.user.nick, reason))
+        send(IrcEvent.Kicked(serverId, e.channel.name, e.target.nick, e.user.nick, reason))
     }
 
     @Handler
@@ -252,7 +283,7 @@ class KitchenSinkListener(
                 else -> raw.toString()
             }
         }.getOrDefault("")
-        sink.trySend(IrcEvent.Numeric(serverId, e.numeric, e.parameters, src))
+        send(IrcEvent.Numeric(serverId, e.numeric, e.parameters, src))
     }
 
     /**
@@ -272,7 +303,7 @@ class KitchenSinkListener(
         if (cmd == "PING") return  // let KICL auto-reply
         if (cmd == "ACTION") return // never a query
         e.setReply(null)            // disable KICL's default sync reply
-        sink.trySend(
+        send(
             IrcEvent.CtcpQuery(
                 serverId = serverId,
                 sender = e.actor.nick,
@@ -296,7 +327,7 @@ class KitchenSinkListener(
         val cmd = (if (space < 0) msg else msg.substring(0, space)).uppercase()
         val args = if (space < 0) "" else msg.substring(space + 1)
         if (cmd == "ACTION") return
-        sink.trySend(
+        send(
             IrcEvent.CtcpQuery(
                 serverId = serverId,
                 sender = e.actor.nick,
@@ -326,7 +357,7 @@ class KitchenSinkListener(
             "done" -> TypingState.DONE
             else -> return
         }
-        sink.trySend(
+        send(
             IrcEvent.Typing(
                 serverId = serverId,
                 target = target,
