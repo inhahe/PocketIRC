@@ -77,6 +77,37 @@ class BufferStore(private val history: ChatLineRepository? = null) {
      *  suppression only applies when the app is actually visible. */
     @Volatile var foreground: Boolean = false
 
+    /**
+     * Open channel buffers on [serverId] that intersect [channels].
+     *
+     * QUIT and NICK are server-wide messages with no channel parameter, so the
+     * only correct place to render them is the channels we actually share with
+     * that user. Broadcasting to every open channel buffer instead — which is
+     * what this used to do — meant a channel filled up with quits and renames
+     * from people who had never been in it, which is especially loud behind a
+     * bouncer that tracks a dozen channels.
+     *
+     * An empty [channels] means the client had no membership information for
+     * the user, so nothing is shown in any channel rather than showing it in
+     * the wrong ones. An open query with [nick] always counts as relevant,
+     * since that buffer is about that person by definition.
+     */
+    private fun buffersConcerning(
+        serverId: String,
+        nick: String,
+        channels: List<String>,
+    ): List<Buffer> {
+        val wanted = channels.map { it.lowercase() }.toSet()
+        val queryName = nick.lowercase()
+        return _buffers.value.values.filter {
+            it.serverId == serverId && when (it.kind) {
+                TreeNode.Buffer.Kind.CHANNEL -> it.name.lowercase() in wanted
+                TreeNode.Buffer.Kind.QUERY -> it.name.lowercase() == queryName
+                TreeNode.Buffer.Kind.STATUS -> false
+            }
+        }
+    }
+
     /** Returns true if the line should fire a mention notification. */
     fun ingest(event: IrcEvent, ourNick: String): Boolean {
         return when (event) {
@@ -108,23 +139,18 @@ class BufferStore(private val history: ChatLineRepository? = null) {
             }
             is IrcEvent.Quit -> {
                 val reason = if (event.reason.isNullOrBlank()) "" else " (${event.reason})"
-                // Append a "quit" line to every buffer where this nick is currently a member.
-                _buffers.value.values
-                    .filter { it.serverId == event.serverId && it.kind == TreeNode.Buffer.Kind.CHANNEL }
-                    .forEach { buf ->
-                        appendSystem(event.serverId, buf.name,
-                            "${event.nick} quit$reason", subjectNicks = listOf(event.nick))
-                    }
+                buffersConcerning(event.serverId, event.nick, event.channels).forEach { buf ->
+                    appendSystem(event.serverId, buf.name,
+                        "${event.nick} quit$reason", subjectNicks = listOf(event.nick))
+                }
                 false
             }
             is IrcEvent.NickChanged -> {
-                _buffers.value.values
-                    .filter { it.serverId == event.serverId && it.kind == TreeNode.Buffer.Kind.CHANNEL }
-                    .forEach { buf ->
-                        appendSystem(event.serverId, buf.name,
-                            "${event.oldNick} is now known as ${event.newNick}",
-                            subjectNicks = listOf(event.oldNick, event.newNick))
-                    }
+                buffersConcerning(event.serverId, event.oldNick, event.channels).forEach { buf ->
+                    appendSystem(event.serverId, buf.name,
+                        "${event.oldNick} is now known as ${event.newNick}",
+                        subjectNicks = listOf(event.oldNick, event.newNick))
+                }
                 false
             }
             is IrcEvent.Kicked -> {

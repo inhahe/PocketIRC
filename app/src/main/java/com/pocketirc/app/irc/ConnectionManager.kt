@@ -507,15 +507,48 @@ class ConnectionManager(history: ChatLineRepository? = null) {
         replayBuffer.remove(id)
     }
 
+    /**
+     * Report an outbound line that never reached the server.
+     *
+     * Local echo used to run unconditionally, so a message typed while the
+     * connection was down looked exactly like one that was delivered — it sat
+     * in the buffer as normal text and the only hint anything was wrong was the
+     * "you joined" line that showed up after the reconnect. The text is echoed
+     * back inside the error so nothing the user typed is lost.
+     */
+    private fun reportNotSent(serverId: String, target: String, text: String) {
+        store.appendSystemTo(serverId, "$serverId::$target",
+            "Not sent (not connected): $text")
+    }
+
+    /**
+     * True when [serverId] has a live client that has finished registering.
+     * Both halves matter: `client` is null during an outage, and a client that
+     * has connected but not yet completed registration cannot carry PRIVMSGs.
+     */
+    private fun canSend(serverId: String): Boolean =
+        serverId in _connectedIds.value &&
+            _connections.value[serverId]?.hasClient() == true
+
     fun sendMessage(serverId: String, target: String, text: String) {
-        val conn = _connections.value[serverId] ?: return
-        conn.sendMessage(target, text)
+        val conn = _connections.value[serverId] ?: run {
+            reportNotSent(serverId, target, text); return
+        }
+        if (!canSend(serverId) || !conn.sendMessage(target, text)) {
+            reportNotSent(serverId, target, text)
+            return
+        }
         store.appendOwnMessage(serverId, target, resolveIdentity(conn.config).nick, text, action = false)
     }
 
     fun sendAction(serverId: String, target: String, text: String) {
-        val conn = _connections.value[serverId] ?: return
-        conn.sendAction(target, text)
+        val conn = _connections.value[serverId] ?: run {
+            reportNotSent(serverId, target, "/me $text"); return
+        }
+        if (!canSend(serverId) || !conn.sendAction(target, text)) {
+            reportNotSent(serverId, target, "/me $text")
+            return
+        }
         store.appendOwnMessage(serverId, target, resolveIdentity(conn.config).nick, text, action = true)
     }
 
@@ -584,7 +617,16 @@ class ConnectionManager(history: ChatLineRepository? = null) {
         if (originBufferId != null) router.register(serverId, "invite", nick, originBufferId)
         _connections.value[serverId]?.invite(nick, channel)
     }
-    fun names(serverId: String, channel: String) {
+    /**
+     * Send NAMES for [channel].
+     *
+     * [originBufferId] is non-null only when the user explicitly asked (i.e.
+     * `/names`); that registers a reply route so the 353 list is printed there.
+     * Passing null requests the list purely to refresh the nick-list panel and
+     * prints nothing — see the 353 handler in [handleNumeric].
+     */
+    fun names(serverId: String, channel: String, originBufferId: String? = null) {
+        if (originBufferId != null) router.register(serverId, "names", channel, originBufferId)
         _connections.value[serverId]?.names(channel)
     }
 
@@ -772,13 +814,23 @@ class ConnectionManager(history: ChatLineRepository? = null) {
                 store.appendSystemTo(serverId, "$serverId::$chan",
                     "${params[2]}")
             }
-            // NAMES reply 353 = <chan> :nick1 nick2 ... and end-of-names 366
+            // NAMES reply 353 = <chan> :nick1 nick2 ... and end-of-names 366.
+            //
+            // Only print the list when the user actually asked for it with
+            // /names. Servers send NAMES unsolicited on every JOIN, a bouncer
+            // re-sends it for every channel on every attach, and selecting a
+            // buffer requests one to refresh the nick-list panel — so printing
+            // every 353 buried the conversation under "Users: ..." dumps.
+            // Unrequested lists still reach the nick-list panel via the
+            // nickListVersion bump in processEvent.
             353 -> if (params.size >= 4) {
                 val chan = params[2]
-                store.appendSystemTo(serverId, "$serverId::$chan",
-                    "Users: ${params[3]}")
+                router.lookup(serverId, "names", chan)?.let { routed ->
+                    store.appendSystemTo(serverId, routed, "Users: ${params[3]}")
+                }
             }
-            366 -> { /* end of names; KICL has the list now, no UI noise */ }
+            // RPL_ENDOFNAMES 366 <chan> :End of /NAMES list.
+            366 -> if (params.size >= 2) router.clear(serverId, "names", params[1])
 
             // RPL_WHOISUSER  311 <nick> <user> <host> * :<realname>
             311 -> {
@@ -992,6 +1044,43 @@ class ConnectionManager(history: ChatLineRepository? = null) {
             306 -> {
                 routeKind(serverId, "away", "", "You have been marked as away.")
                 router.clear(serverId, "away", "")
+            }
+
+            // ----- Delivery failures. The server accepted the connection but
+            // refused this particular PRIVMSG/NOTICE. Local echo has already
+            // put the line in the buffer looking sent, so say plainly that it
+            // wasn't rather than leaving the user to decode a bare numeric.
+            // 401 ERR_NOSUCHNICK is overloaded: it also terminates a failed
+            // WHOIS. If a whois for this nick is outstanding, that's what it
+            // means, so let the normal 4xx path report it instead.
+            401 -> if (params.size >= 2 &&
+                router.lookup(serverId, "whois", params[1]) == null
+            ) {
+                val target = params[1]
+                val detail = params.drop(2).joinToString(" ").ifBlank { "no such nick" }
+                val id = "$serverId::$target"
+                store.appendSystemTo(
+                    serverId,
+                    if (store.buffers.value.containsKey(id)) id else null,
+                    "Message to $target not delivered: $detail",
+                )
+            } else if (params.size >= 2) {
+                routeWhois(serverId, params[1],
+                    "${params[1]}: ${params.drop(2).joinToString(" ")}")
+            }
+
+            // 404 ERR_CANNOTSENDTOCHAN, 407 ERR_TOOMANYTARGETS,
+            // 442 ERR_NOTONCHANNEL, 437 ERR_UNAVAILRESOURCE,
+            // 486 / 716 "target is blocking private messages"
+            404, 407, 437, 442, 486, 716 -> if (params.size >= 2) {
+                val target = params[1]
+                val detail = params.drop(2).joinToString(" ").ifBlank { "rejected by the server" }
+                val id = "$serverId::$target"
+                store.appendSystemTo(
+                    serverId,
+                    if (store.buffers.value.containsKey(id)) id else null,
+                    "Message to $target not delivered: $detail",
+                )
             }
 
             else -> {

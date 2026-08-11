@@ -21,11 +21,20 @@ sealed interface IrcEvent {
         override val serverId: String,
         val nick: String,
         val reason: String?,
+        /**
+         * Channels the quitting user was in, per the client's own tracking at
+         * the moment the QUIT arrived. QUIT carries no channel of its own, so
+         * without this the line has nowhere to go but "every channel" — which
+         * spams a channel with quits from people who were never in it.
+         */
+        val channels: List<String> = emptyList(),
     ) : IrcEvent
     data class NickChanged(
         override val serverId: String,
         val oldNick: String,
         val newNick: String,
+        /** Channels the renaming user is in. See [Quit.channels]. */
+        val channels: List<String> = emptyList(),
     ) : IrcEvent
     data class Kicked(
         override val serverId: String,

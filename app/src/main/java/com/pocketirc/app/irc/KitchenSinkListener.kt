@@ -243,12 +243,19 @@ class KitchenSinkListener(
 
     @Handler
     fun onQuit(e: UserQuitEvent) {
-        send(IrcEvent.Quit(serverId, e.user.nick, e.message))
+        // Snapshot the user's channels NOW. KICL's DefaultQuitListener fires
+        // this event before calling trackUserQuit(), so the snapshot still
+        // knows which channels the user was in; a moment later it won't.
+        val channels = runCatching { e.user.channels.toList() }.getOrDefault(emptyList())
+        send(IrcEvent.Quit(serverId, e.user.nick, e.message, channels))
     }
 
     @Handler
     fun onNickChange(e: UserNickChangeEvent) {
-        send(IrcEvent.NickChanged(serverId, e.oldUser.nick, e.newUser.nick))
+        val channels = runCatching { e.oldUser.channels.toList() }
+            .getOrDefault(emptyList())
+            .ifEmpty { runCatching { e.newUser.channels.toList() }.getOrDefault(emptyList()) }
+        send(IrcEvent.NickChanged(serverId, e.oldUser.nick, e.newUser.nick, channels))
     }
 
     @Handler

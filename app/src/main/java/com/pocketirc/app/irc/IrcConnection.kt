@@ -415,8 +415,19 @@ class IrcConnection(
         const val MAX_NICK_FALLBACK_LEVEL = 5
     }
 
-    fun sendMessage(target: String, text: String) {
-        client?.sendMessage(target, text)
+    /**
+     * True while a live KICL client exists to send through. `client` is null
+     * between [retireClient] and the next successful dial, and everything on
+     * this class is written as `client?.…` — so without checking this first,
+     * outbound traffic during an outage is silently discarded.
+     */
+    fun hasClient(): Boolean = client != null
+
+    /** Returns false if there was no live client, i.e. the line was dropped. */
+    fun sendMessage(target: String, text: String): Boolean {
+        val c = client ?: return false
+        c.sendMessage(target, text)
+        return true
     }
 
     fun sendTyping(target: String, state: TypingState) {
@@ -461,7 +472,12 @@ class IrcConnection(
     fun sendRaw(line: String) { client?.sendRawLine(line) }
     fun sendWhois(target: String) { client?.sendRawLine("WHOIS $target") }
     fun sendWhowas(target: String) { client?.sendRawLine("WHOWAS $target") }
-    fun sendAction(target: String, text: String) { client?.sendCtcpMessage(target, "ACTION $text") }
+    /** Returns false if there was no live client, i.e. the line was dropped. */
+    fun sendAction(target: String, text: String): Boolean {
+        val c = client ?: return false
+        c.sendCtcpMessage(target, "ACTION $text")
+        return true
+    }
     fun sendNotice(target: String, text: String) { client?.sendRawLine("NOTICE $target :$text") }
     fun sendCtcp(target: String, tag: String, data: String?) {
         val payload = if (data.isNullOrBlank()) tag else "$tag $data"

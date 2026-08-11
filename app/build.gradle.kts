@@ -14,8 +14,11 @@ android {
         applicationId = "com.pocketirc.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.7.0"
+        // Bump BOTH on every release -- see CLAUDE.md. versionCode must strictly
+        // increase or Android refuses the upgrade. Mapping so far:
+        //   1 = 0.7.0, 2 = 0.7.1, 3 = 0.7.2 (never published), 4 = 0.8.0
+        versionCode = 4
+        versionName = "0.8.0"
     }
 
     buildTypes {

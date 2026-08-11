@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -26,8 +27,10 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -51,6 +55,7 @@ import com.pocketirc.app.irc.BufferStore
 import com.pocketirc.app.model.ChatLine
 import com.pocketirc.app.model.TypingState
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -64,6 +69,93 @@ private sealed interface ChatEntry {
         override val key get() = "unread-$beforeLineId"
     }
 }
+
+/** How a press has been classified. See [selectionAutoScroll]. */
+private enum class DragMode { UNKNOWN, SCROLL, SELECT }
+
+/**
+ * Scrolls [listState] while the user drags a text selection past the top or
+ * bottom edge of the list.
+ *
+ * `SelectionContainer` extends the selection to wherever the finger is but
+ * never scrolls the content underneath it, so without this you can only ever
+ * select what already fits on screen. This observes pointer events on the
+ * [PointerEventPass.Initial] pass and consumes nothing, so ordinary scrolling,
+ * tapping and the selection gesture itself all behave exactly as before.
+ *
+ * Telling a selection drag from a scroll drag: a selection can only start with
+ * a long press, and while one is being dragged the list is not scrolling. So a
+ * press is classified the first time either signal appears — the list starting
+ * to scroll means [DragMode.SCROLL], and the finger still being down past the
+ * long-press timeout without the list having moved means [DragMode.SELECT].
+ * The decision is latched for the rest of the gesture, which matters because
+ * once auto-scroll starts the list *is* scrolling and would otherwise
+ * immediately re-classify itself as a scroll drag and stop.
+ */
+@Composable
+private fun Modifier.selectionAutoScroll(listState: LazyListState): Modifier {
+    val density = LocalDensity.current
+    // Speed ramps from zero to the maximum over this much overshoot past the
+    // edge, so a fingertip just over the boundary creeps and a deliberate drag
+    // well past it moves quickly.
+    val rampPx = with(density) { 96.dp.toPx() }
+    val maxPxPerFrame = with(density) { 16.dp.toPx() }
+
+    val velocity = remember { mutableFloatStateOf(0f) }
+    val scrolling by remember { derivedStateOf { velocity.floatValue != 0f } }
+
+    LaunchedEffect(scrolling) {
+        if (!scrolling) return@LaunchedEffect
+        while (isActive) {
+            withFrameNanos { }
+            listState.scrollBy(velocity.floatValue)
+        }
+    }
+
+    return this.pointerInput(Unit) {
+        val longPressMs = viewConfiguration.longPressTimeoutMillis
+        awaitPointerEventScope {
+            var wasPressed = false
+            var pressedAtMs = 0L
+            var mode = DragMode.UNKNOWN
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val pointer = event.changes.firstOrNull { it.pressed }
+                if (pointer == null) {
+                    velocity.floatValue = 0f
+                    wasPressed = false
+                    mode = DragMode.UNKNOWN
+                    continue
+                }
+                if (!wasPressed) {
+                    wasPressed = true
+                    pressedAtMs = pointer.uptimeMillis
+                    mode = DragMode.UNKNOWN
+                }
+                if (mode == DragMode.UNKNOWN) {
+                    mode = when {
+                        listState.isScrollInProgress -> DragMode.SCROLL
+                        pointer.uptimeMillis - pressedAtMs >= longPressMs -> DragMode.SELECT
+                        else -> DragMode.UNKNOWN
+                    }
+                }
+                velocity.floatValue = if (mode != DragMode.SELECT) 0f else {
+                    val y = pointer.position.y
+                    val height = size.height.toFloat()
+                    when {
+                        // Negative scrolls toward earlier items (up the log).
+                        y < 0f -> -edgeSpeed(-y, rampPx, maxPxPerFrame)
+                        y > height -> edgeSpeed(y - height, rampPx, maxPxPerFrame)
+                        else -> 0f
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun edgeSpeed(overshootPx: Float, rampPx: Float, maxPxPerFrame: Float): Float =
+    (overshootPx / rampPx).coerceIn(0f, 1f) * maxPxPerFrame
 
 @Composable
 fun BufferView(
@@ -157,9 +249,16 @@ private fun BufferViewInner(
             if (buffer.lines.isNotEmpty()) listState.scrollToItem(buffer.lines.lastIndex)
         }
         // Smooth-scroll to follow new lines as they arrive within the
-        // currently-open buffer.
+        // currently-open buffer -- but only while the user is already parked at
+        // the bottom. Following unconditionally yanked the view away from
+        // anyone scrolled up reading history, and made it impossible to drag a
+        // selection through older lines in an active channel.
         LaunchedEffect(buffer.id, buffer.lines.size) {
-            if (buffer.lines.isNotEmpty()) listState.animateScrollToItem(buffer.lines.lastIndex)
+            if (buffer.lines.isEmpty()) return@LaunchedEffect
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val atBottom = lastVisible < 0 || lastVisible >= info.totalItemsCount - 2
+            if (atBottom) listState.animateScrollToItem(buffer.lines.lastIndex)
         }
 
         // Apply search filter, then splice in the unread divider.
@@ -183,7 +282,12 @@ private fun BufferViewInner(
             }
             out
         }
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .selectionAutoScroll(listState),
+        ) {
             SelectionContainer {
                 LazyColumn(
                     state = listState,

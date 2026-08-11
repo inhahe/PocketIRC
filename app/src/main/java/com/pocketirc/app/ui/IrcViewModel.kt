@@ -293,11 +293,13 @@ class IrcViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope.launch { store.hydrate(parts[0], parts[1]) }
             // If this is a channel, request a fresh NAMES so the nick list
             // panel reflects current membership even when KICL's tracked state
-            // hasn't been updated since join.
+            // hasn't been updated since join. No originBufferId: this is an
+            // internal refresh, so the reply updates the panel silently instead
+            // of printing a "Users: ..." line into the channel.
             val target = parts[1]
             if (target.startsWith("#") || target.startsWith("&")) {
                 _service.value?.manager?.let { mgr ->
-                    runCatching { mgr.sendRaw(parts[0], "NAMES $target") }
+                    runCatching { mgr.names(parts[0], target) }
                 }
             }
         }
@@ -509,7 +511,7 @@ class IrcViewModel(app: Application) : AndroidViewModel(app) {
                 val ch = p.channel ?: buf.name.takeIf {
                     buf.kind == TreeNode.Buffer.Kind.CHANNEL
                 }
-                if (ch != null) mgr.names(buf.serverId, ch)
+                if (ch != null) mgr.names(buf.serverId, ch, originBufferId = bufId)
                 else mgr.store.appendSystemTo(buf.serverId, bufId, "/names: specify a channel")
             }
             is ParsedInput.NoticeCmd -> {

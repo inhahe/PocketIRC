@@ -24,7 +24,10 @@ Description: |-
 
     * Multi-network with auto-reconnect, per-server token-bucket rate limiting
     * SASL PLAIN, server PASS, IRCv3 message-tags, MONITOR / ISON notify list
-    * Mention, PM, notice, and notify-list system notifications with inline reply
+    * Mention, PM, and notice system notifications with inline reply, plus
+      notify-list online/offline notifications
+    * /alert and /on -d hook notifications routed through any number of
+      user-defined notification channels with configurable sound and vibration
     * Tablet/landscape persistent split layout (server tree + chat + nick list)
     * Searchable, exportable per-buffer history persisted in Room
     * Channel info screen with mode flags, ban / except / invite / quiet lists
@@ -39,7 +42,7 @@ Description: |-
     * No analytics, no tracking, no Google Play Services
 
 RepoType: git
-Repo: https://github.com/REPLACE_ME/pocketirc.git
+Repo: https://github.com/inhahe/PocketIRC.git
 
 Builds:
   - versionName: '0.7.0'
@@ -50,7 +53,15 @@ Builds:
       - yes
     output: build/outputs/apk/release/app-release-unsigned.apk
 
+  - versionName: '0.8.0'
+    versionCode: 4
+    commit: v0.8.0
+    subdir: app
+    gradle:
+      - yes
+    output: build/outputs/apk/release/app-release-unsigned.apk
+
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: '0.7.0'
-CurrentVersionCode: 1
+CurrentVersion: '0.8.0'
+CurrentVersionCode: 4
