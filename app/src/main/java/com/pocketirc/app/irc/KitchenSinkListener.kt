@@ -19,6 +19,8 @@ import org.kitteh.irc.client.library.event.user.PrivateMessageEvent
 import org.kitteh.irc.client.library.event.user.PrivateNoticeEvent
 import org.kitteh.irc.client.library.event.user.PrivateCtcpQueryEvent
 import org.kitteh.irc.client.library.event.channel.ChannelCtcpEvent
+import org.kitteh.irc.client.library.event.capabilities.CapabilitiesNewSupportedEvent
+import org.kitteh.irc.client.library.event.capabilities.CapabilitiesSupportedListEvent
 
 /**
  * Kitteh @Handler-based listener that funnels events into a coroutine [Channel]
@@ -31,6 +33,10 @@ class KitchenSinkListener(
     private val serverId: String,
     private val sink: Channel<IrcEvent>,
 ) {
+    companion object {
+        const val ECHO_MESSAGE = "echo-message"
+    }
+
     /**
      * Cleared by [IrcConnection] when the owning Client is retired, before it
      * is shut down. A retired listener must go silent: MBassador keeps it
@@ -137,6 +143,39 @@ class KitchenSinkListener(
         }.getOrNull()
     }
 
+    /**
+     * Request `echo-message` whenever the server offers it.
+     *
+     * KICL's default capability list deliberately leaves this one out, so it
+     * has to be asked for explicitly here and in [onCapabilitiesNew] (a bouncer
+     * may only advertise it once its own upstream is up, via CAP NEW).
+     *
+     * It is worth asking for because it is the only way a client behind a
+     * bouncer can distinguish "I sent this from this phone" from "I sent this
+     * from my desktop". Without it the two are identical on the wire, so the
+     * client must either show its own messages twice or hide them all — and
+     * PocketIRC chose to hide them, which silently swallowed every message the
+     * user sent from another device.
+     *
+     * When it is acknowledged, [ConnectionManager] stops echoing sent messages
+     * locally and displays the server's copy instead. That has a second
+     * benefit: a message only appears once the server has actually accepted it.
+     */
+    @Handler
+    fun onCapabilitiesSupported(e: CapabilitiesSupportedListEvent) {
+        if (e.supportedCapabilities.any { it.name.equals(ECHO_MESSAGE, ignoreCase = true) }) {
+            e.addRequest(ECHO_MESSAGE)
+        }
+    }
+
+    /** Same request, for capabilities that appear after registration (CAP NEW). */
+    @Handler
+    fun onCapabilitiesNew(e: CapabilitiesNewSupportedEvent) {
+        if (e.newCapabilities.any { it.name.equals(ECHO_MESSAGE, ignoreCase = true) }) {
+            e.addRequest(ECHO_MESSAGE)
+        }
+    }
+
     @Handler
     fun onConnected(e: ClientNegotiationCompleteEvent) {
         send(IrcEvent.Connected(serverId))
@@ -183,7 +222,11 @@ class KitchenSinkListener(
         send(
             IrcEvent.Message(
                 serverId = serverId,
-                target = e.actor.nick,   // PM buffer keyed by sender nick
+                // The real PRIVMSG target, not the sender. They differ for a
+                // message of ours echoed back (target = whoever we messaged),
+                // and BufferStore needs the difference to file the line under
+                // the other party rather than under our own nick.
+                target = e.target,
                 sender = e.actor.nick,
                 text = e.message,
                 timestampMs = ts,
@@ -214,7 +257,7 @@ class KitchenSinkListener(
         send(
             IrcEvent.Message(
                 serverId = serverId,
-                target = e.actor.nick,
+                target = e.target,  // see onPrivateMessage
                 sender = e.actor.nick,
                 text = e.message,
                 isNotice = true,
@@ -308,7 +351,14 @@ class KitchenSinkListener(
         val cmd = (if (space < 0) msg else msg.substring(0, space)).uppercase()
         val args = if (space < 0) "" else msg.substring(space + 1)
         if (cmd == "PING") return  // let KICL auto-reply
-        if (cmd == "ACTION") return // never a query
+        if (cmd == "ACTION") {
+            // Not a query at all: `/me` in a private conversation. KICL routes
+            // every CTCP here, ACTION included, so this is the only place it
+            // can be turned back into a chat line -- dropping it (as this used
+            // to) meant private /me was invisible.
+            sendAction(target = e.target, sender = e.actor.nick, text = args, event = e)
+            return
+        }
         e.setReply(null)            // disable KICL's default sync reply
         send(
             IrcEvent.CtcpQuery(
@@ -333,7 +383,11 @@ class KitchenSinkListener(
         val space = msg.indexOf(' ')
         val cmd = (if (space < 0) msg else msg.substring(0, space)).uppercase()
         val args = if (space < 0) "" else msg.substring(space + 1)
-        if (cmd == "ACTION") return
+        if (cmd == "ACTION") {
+            // An ordinary `/me` in a channel. See onPrivateCtcp.
+            sendAction(target = e.channel.name, sender = e.actor.nick, text = args, event = e)
+            return
+        }
         send(
             IrcEvent.CtcpQuery(
                 serverId = serverId,
@@ -341,6 +395,22 @@ class KitchenSinkListener(
                 target = e.channel.name,
                 command = cmd,
                 args = args,
+            )
+        )
+    }
+
+    /** Emit a CTCP ACTION as the chat line it actually is. */
+    private fun sendAction(target: String, sender: String, text: String, event: Any) {
+        val (ts, fromHistory) = resolveMessageTime(event)
+        send(
+            IrcEvent.Message(
+                serverId = serverId,
+                target = target,
+                sender = sender,
+                text = text,
+                isAction = true,
+                timestampMs = ts,
+                fromHistory = fromHistory,
             )
         )
     }

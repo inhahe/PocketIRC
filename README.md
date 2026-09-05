@@ -8,6 +8,8 @@ Kotlin with Jetpack Compose and Material 3.
 * Multi-network with auto-reconnect, per-server token-bucket rate limiting
 * App-wide default identity (nicks, real name, username) with per-network overrides
 * SASL PLAIN, server PASS, IRCv3 message-tags, MONITOR / ISON notify list
+* IRCv3 `echo-message`: messages you send from another device or client show
+  up here too, without your own messages appearing twice
 * Mention, PM, and notice system notifications with inline reply — respond
   directly from the notification without opening the app — plus notify-list
   online/offline notifications
@@ -40,6 +42,7 @@ Requires JDK 17 and an Android SDK with platform 35.
 ./gradlew assembleDebug         # debug APK at app/build/outputs/apk/debug/
 ./gradlew assembleRelease       # unsigned release APK
 ./gradlew bundleRelease         # release AAB
+./gradlew testDebugUnitTest     # JVM unit tests (app/src/test)
 ```
 
 ## Documentation

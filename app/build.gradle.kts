@@ -16,9 +16,10 @@ android {
         targetSdk = 35
         // Bump BOTH on every release -- see CLAUDE.md. versionCode must strictly
         // increase or Android refuses the upgrade. Mapping so far:
-        //   1 = 0.7.0, 2 = 0.7.1, 3 = 0.7.2 (never published), 4 = 0.8.0
-        versionCode = 4
-        versionName = "0.8.0"
+        //   1 = 0.7.0, 2 = 0.7.1, 3 = 0.7.2 (never published), 4 = 0.8.0,
+        //   5 = 0.9.0
+        versionCode = 5
+        versionName = "0.9.0"
     }
 
     buildTypes {
@@ -77,4 +78,9 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.kitteh.irc.client)
+
+    // Plain JVM unit tests (app/src/test). Everything under test there must be
+    // free of Android framework calls -- there is no Robolectric here, so an
+    // android.jar method would throw "not mocked".
+    testImplementation(libs.junit)
 }

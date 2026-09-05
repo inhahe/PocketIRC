@@ -471,6 +471,12 @@ class ConnectionManager(history: ChatLineRepository? = null) {
                 mapOf("nick" to (ev.setter ?: ""), "channel" to ev.channel,
                       "text" to ev.topic, "topic" to ev.topic))
             is IrcEvent.Message -> {
+                val ourNick = resolveIdentity(config).nick
+                // Never run message hooks on our own words. With echo-message
+                // negotiated the server sends every line we type straight back
+                // to us, so a hook that replies to PRIVMSG would answer itself
+                // -- and then answer its own answer.
+                if (ev.sender.equals(ourNick, ignoreCase = true)) return HookOutcome(false, false)
                 val isChan = ev.target.startsWith("#") || ev.target.startsWith("&")
                 val event = when {
                     ev.isNotice -> OnHookEvents.NOTICE
@@ -481,7 +487,11 @@ class ConnectionManager(history: ChatLineRepository? = null) {
                 val v = mapOf(
                     "nick" to ev.sender,
                     "channel" to (if (isChan) ev.target else ""),
-                    "target" to ev.target,
+                    // {target} is where a hook's reply should go. For a PM the
+                    // literal PRIVMSG target is our own nick, so replying to it
+                    // would talk to ourselves; the conversation partner is the
+                    // sender.
+                    "target" to (if (isChan) ev.target else ev.sender),
                     "text" to ev.text,
                     "message" to ev.text,
                 )
@@ -530,6 +540,26 @@ class ConnectionManager(history: ChatLineRepository? = null) {
         serverId in _connectedIds.value &&
             _connections.value[serverId]?.hasClient() == true
 
+    /**
+     * Show a message we just sent, unless the server is going to send it back.
+     *
+     * With `echo-message` negotiated the server's own copy is authoritative:
+     * it carries the real timestamp, it proves the message was accepted, and
+     * — the reason any of this matters — it is the same copy every one of the
+     * user's other devices gets, so all of them agree on what was said. Adding
+     * a local line as well would duplicate it.
+     *
+     * Without the capability we are on our own, and a local echo is the only
+     * way the user sees what they typed.
+     */
+    private fun echoLocally(
+        conn: IrcConnection, serverId: String, target: String, text: String, action: Boolean,
+    ) {
+        if (conn.echoMessageEnabled()) return
+        store.noteLocalEcho(serverId, target, text)
+        store.appendOwnMessage(serverId, target, resolveIdentity(conn.config).nick, text, action)
+    }
+
     fun sendMessage(serverId: String, target: String, text: String) {
         val conn = _connections.value[serverId] ?: run {
             reportNotSent(serverId, target, text); return
@@ -538,7 +568,7 @@ class ConnectionManager(history: ChatLineRepository? = null) {
             reportNotSent(serverId, target, text)
             return
         }
-        store.appendOwnMessage(serverId, target, resolveIdentity(conn.config).nick, text, action = false)
+        echoLocally(conn, serverId, target, text, action = false)
     }
 
     fun sendAction(serverId: String, target: String, text: String) {
@@ -549,7 +579,7 @@ class ConnectionManager(history: ChatLineRepository? = null) {
             reportNotSent(serverId, target, "/me $text")
             return
         }
-        store.appendOwnMessage(serverId, target, resolveIdentity(conn.config).nick, text, action = true)
+        echoLocally(conn, serverId, target, text, action = true)
     }
 
     fun nicksIn(serverId: String, channel: String): List<String> =

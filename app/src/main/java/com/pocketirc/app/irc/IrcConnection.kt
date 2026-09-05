@@ -423,6 +423,24 @@ class IrcConnection(
      */
     fun hasClient(): Boolean = client != null
 
+    /** True if [cap] was acknowledged on the live connection. */
+    private fun capEnabled(cap: String): Boolean = try {
+        client?.capabilityManager?.capabilities?.any {
+            it.name.equals(cap, ignoreCase = true)
+        } ?: false
+    } catch (_: Throwable) { false }
+
+    /**
+     * True when the server sends our own messages back to us.
+     *
+     * [ConnectionManager] uses this to decide whether to echo a sent message
+     * into the buffer itself. When the server does it, ours would be a
+     * duplicate — and worse, the local copy is indistinguishable from the
+     * server's, which is exactly the ambiguity that made PocketIRC hide
+     * messages the user sent from their other devices.
+     */
+    fun echoMessageEnabled(): Boolean = capEnabled(KitchenSinkListener.ECHO_MESSAGE)
+
     /** Returns false if there was no live client, i.e. the line was dropped. */
     fun sendMessage(target: String, text: String): Boolean {
         val c = client ?: return false
@@ -435,12 +453,7 @@ class IrcConnection(
         // Only send TAGMSG when message-tags is actually negotiated. Without it,
         // servers (especially +R/+m channels on Libera) treat the line as a
         // PRIVMSG attempt and bounce 415 errors back at us on every keystroke.
-        val tagsEnabled = try {
-            c.capabilityManager.capabilities.any {
-                it.name.equals("message-tags", ignoreCase = true)
-            }
-        } catch (_: Throwable) { false }
-        if (!tagsEnabled) return
+        if (!capEnabled("message-tags")) return
         val value = when (state) {
             TypingState.ACTIVE -> "active"
             TypingState.PAUSED -> "paused"

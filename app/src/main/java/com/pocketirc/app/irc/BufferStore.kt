@@ -172,15 +172,39 @@ class BufferStore(private val history: ChatLineRepository? = null) {
                 false
             }
             is IrcEvent.Message -> {
-                // Suppress server-echoed copies of our own messages (echo-message
-                // CAP, ZNC playback, multi-attach bouncers). Local echo handles
-                // displaying our own outgoing messages.
-                if (event.sender.equals(ourNick, ignoreCase = true)) return false
+                // A message from our own nick is either a copy of something
+                // this device just sent, or something the user said on one of
+                // their other devices. This used to drop both, so a message
+                // typed on the desktop simply never appeared on the phone --
+                // the two are identical on the wire and there was nothing to
+                // tell them apart.
+                //
+                // consumeLocalEcho() is that missing distinction: it matches
+                // only against messages this device echoed locally moments ago,
+                // and only once each. Anything it doesn't claim is a message
+                // from elsewhere and gets shown.
+                if (event.sender.equals(ourNick, ignoreCase = true) &&
+                    consumeLocalEcho(event.serverId, event.target, event.text)
+                ) return false
+                val fromUs = event.sender.equals(ourNick, ignoreCase = true)
                 val isPm = !event.target.startsWith("#") && !event.target.startsWith("&")
-                val bufferName = if (isPm) event.sender else event.target
+                // A query buffer is named after the other party. For an
+                // incoming PM that is the sender; for our own message coming
+                // back it is the recipient, or the conversation would be filed
+                // under our own nick.
+                val bufferName = when {
+                    !isPm -> event.target
+                    fromUs -> event.target
+                    else -> event.sender
+                }
                 val kind = if (isPm) TreeNode.Buffer.Kind.QUERY else TreeNode.Buffer.Kind.CHANNEL
                 ensureBuffer(event.serverId, bufferName, kind)
-                val highlight = isPm || event.text.contains(ourNick, ignoreCase = true)
+                // Never highlight on our own words. Every PM counts as a
+                // highlight and most people type their own nick often, so
+                // without this a message sent from another device would ping
+                // this one -- the user notifying themselves.
+                val highlight = !fromUs &&
+                    (isPm || event.text.contains(ourNick, ignoreCase = true))
                 appendLine(
                     event.serverId, bufferName,
                     ChatLine(
@@ -243,6 +267,75 @@ class BufferStore(private val history: ChatLineRepository? = null) {
         ensureBuffer(serverId, name, kind)
     }
 
+
+    /**
+     * Messages this device echoed locally, awaiting a server copy to swallow.
+     *
+     * Keyed by server + target + exact text, valued by the times at which the
+     * echoes happened (one entry per send, so sending the same line twice
+     * absorbs exactly two copies back). Only consulted for messages whose
+     * sender is our own nick.
+     */
+    private val localEchoes = java.util.concurrent.ConcurrentHashMap<String, MutableList<Long>>()
+
+    /**
+     * How long a local echo can absorb a matching server copy.
+     *
+     * Long enough to cover a slow mobile round trip through a bouncer that is
+     * itself waiting on the network; short enough that it cannot swallow a
+     * genuinely new message the user typed on another device. Anything older
+     * has to be shown, because a message wrongly hidden is gone forever
+     * whereas a message wrongly shown twice is merely untidy.
+     */
+    private val echoWindowMs = 30_000L
+
+    /** Record that [text] was just echoed locally into [target]. */
+    fun noteLocalEcho(serverId: String, target: String, text: String) {
+        val now = System.currentTimeMillis()
+        val stamps = localEchoes.getOrPut(echoKey(serverId, target, text)) {
+            java.util.Collections.synchronizedList(mutableListOf())
+        }
+        synchronized(stamps) {
+            stamps.removeAll { now - it > echoWindowMs }
+            stamps.add(now)
+        }
+        pruneLocalEchoes(now)
+    }
+
+    /**
+     * Claim an inbound self-authored message as the echo of a local send.
+     *
+     * Returns true (and consumes the record) when this device is the one that
+     * sent it, so the caller can drop the duplicate. Returns false when there
+     * is no matching recent send — meaning the message came from one of the
+     * user's other devices and must be displayed.
+     */
+    private fun consumeLocalEcho(serverId: String, target: String, text: String): Boolean {
+        val now = System.currentTimeMillis()
+        val stamps = localEchoes[echoKey(serverId, target, text)] ?: return false
+        synchronized(stamps) {
+            stamps.removeAll { now - it > echoWindowMs }
+            if (stamps.isEmpty()) return false
+            stamps.removeAt(0)
+            return true
+        }
+    }
+
+    private fun echoKey(serverId: String, target: String, text: String): String =
+        "$serverId\u0000${target.lowercase()}\u0000$text"
+
+    /** Drop expired echo records so a long session doesn't accumulate them. */
+    private fun pruneLocalEchoes(now: Long) {
+        val iterator = localEchoes.entries.iterator()
+        while (iterator.hasNext()) {
+            val stamps = iterator.next().value
+            val empty = synchronized(stamps) {
+                stamps.removeAll { now - it > echoWindowMs }
+                stamps.isEmpty()
+            }
+            if (empty) iterator.remove()
+        }
+    }
 
     /** Append a self-authored chat line locally (for echo, before any server roundtrip). */
     fun appendOwnMessage(serverId: String, target: String, ourNick: String, text: String, action: Boolean) {
