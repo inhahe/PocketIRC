@@ -183,9 +183,12 @@ class BufferStore(private val history: ChatLineRepository? = null) {
                 // only against messages this device echoed locally moments ago,
                 // and only once each. Anything it doesn't claim is a message
                 // from elsewhere and gets shown.
-                if (event.sender.equals(ourNick, ignoreCase = true) &&
-                    consumeLocalEcho(event.serverId, event.target, event.text)
-                ) return false
+                if (event.sender.equals(ourNick, ignoreCase = true)) {
+                    // The server owed us this line; it arrived, so no
+                    // "unconfirmed" warning is due for it.
+                    confirmEcho(event.serverId, event.target, event.text)
+                    if (consumeLocalEcho(event.serverId, event.target, event.text)) return false
+                }
                 val fromUs = event.sender.equals(ourNick, ignoreCase = true)
                 val isPm = !event.target.startsWith("#") && !event.target.startsWith("&")
                 // A query buffer is named after the other party. For an
@@ -288,6 +291,55 @@ class BufferStore(private val history: ChatLineRepository? = null) {
      * whereas a message wrongly shown twice is merely untidy.
      */
     private val echoWindowMs = 30_000L
+
+    /**
+     * Sends that are waiting on the server to echo them back.
+     *
+     * Only used when `echo-message` is negotiated, where nothing is drawn
+     * locally and the server's copy is the only one there will ever be. If
+     * that copy never arrives the user is left with no line and no error --
+     * which is precisely what happened when a bouncer's upstream was in the
+     * middle of a reconnect wait: three messages typed into a channel produced
+     * neither text nor warning in that channel.
+     *
+     * Keyed the same way as [localEchoes] but with the opposite purpose:
+     * these entries do not *suppress* the inbound copy, they only record that
+     * one is owed, so [confirmEcho] can cancel the warning when it lands.
+     */
+    private val awaitingEcho = java.util.concurrent.ConcurrentHashMap<Long, Pending>()
+
+    private data class Pending(val key: String, val at: Long)
+
+    private val pendingIds = AtomicLong(0)
+
+    /** Note that we are relying on the server to echo [text] back. */
+    fun noteAwaitingEcho(serverId: String, target: String, text: String): Long {
+        val id = pendingIds.incrementAndGet()
+        awaitingEcho[id] = Pending(echoKey(serverId, target, text), System.currentTimeMillis())
+        return id
+    }
+
+    /**
+     * Cancel the oldest outstanding warning for this (server, target, text).
+     *
+     * Called for every inbound self-authored message, including ones that came
+     * from the user's other devices: an identical line from elsewhere is
+     * indistinguishable on the wire, and treating it as confirmation only
+     * risks suppressing a warning, never inventing one.
+     */
+    fun confirmEcho(serverId: String, target: String, text: String) {
+        val key = echoKey(serverId, target, text)
+        val oldest = awaitingEcho.entries
+            .filter { it.value.key == key }
+            .minByOrNull { it.value.at } ?: return
+        awaitingEcho.remove(oldest.key)
+    }
+
+    /**
+     * Give up on the echo for [id]. Returns true if it never arrived, meaning
+     * the caller should tell the user the message is unaccounted for.
+     */
+    fun abandonEcho(id: Long): Boolean = awaitingEcho.remove(id) != null
 
     /** Record that [text] was just echoed locally into [target]. */
     fun noteLocalEcho(serverId: String, target: String, text: String) {

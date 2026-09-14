@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -526,6 +527,15 @@ class ConnectionManager(history: ChatLineRepository? = null) {
      * "you joined" line that showed up after the reconnect. The text is echoed
      * back inside the error so nothing the user typed is lost.
      */
+    /**
+     * How long to wait for `echo-message` to bring a sent line back.
+     *
+     * Deliberately longer than a slow mobile round trip and longer than a
+     * bouncer forwarding to a rate-limited upstream, because a false warning
+     * about a message that did arrive is worse noise than a late true one.
+     */
+    private val ECHO_CONFIRM_TIMEOUT_MS = 20_000L
+
     private fun reportNotSent(serverId: String, target: String, text: String) {
         store.appendSystemTo(serverId, "$serverId::$target",
             "Not sent (not connected): $text")
@@ -551,11 +561,28 @@ class ConnectionManager(history: ChatLineRepository? = null) {
      *
      * Without the capability we are on our own, and a local echo is the only
      * way the user sees what they typed.
+     *
+     * Relying on the server's copy means relying on it actually coming back.
+     * When it doesn't, suppressing local echo turns a failed send into total
+     * silence -- no line, no error, nothing to retry from. So every suppressed
+     * echo is tracked and, if nothing matching has arrived by
+     * [ECHO_CONFIRM_TIMEOUT_MS], the text is put back in front of the user.
      */
     private fun echoLocally(
         conn: IrcConnection, serverId: String, target: String, text: String, action: Boolean,
     ) {
-        if (conn.echoMessageEnabled()) return
+        if (conn.echoMessageEnabled()) {
+            val pending = store.noteAwaitingEcho(serverId, target, text)
+            scope.launch {
+                delay(ECHO_CONFIRM_TIMEOUT_MS)
+                if (store.abandonEcho(pending)) {
+                    val shown = if (action) "/me $text" else text
+                    store.appendSystemTo(serverId, "$serverId::$target",
+                        "Never confirmed by the server - may not have been sent: $shown")
+                }
+            }
+            return
+        }
         store.noteLocalEcho(serverId, target, text)
         store.appendOwnMessage(serverId, target, resolveIdentity(conn.config).nick, text, action)
     }

@@ -17,9 +17,9 @@ android {
         // Bump BOTH on every release -- see CLAUDE.md. versionCode must strictly
         // increase or Android refuses the upgrade. Mapping so far:
         //   1 = 0.7.0, 2 = 0.7.1, 3 = 0.7.2 (never published), 4 = 0.8.0,
-        //   5 = 0.9.0
-        versionCode = 5
-        versionName = "0.9.0"
+        //   5 = 0.9.0 (never published), 6 = 0.9.1
+        versionCode = 6
+        versionName = "0.9.1"
     }
 
     buildTypes {
