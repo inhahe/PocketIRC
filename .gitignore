@@ -23,3 +23,16 @@ desktop.ini
 *.log
 *.tmp
 hs_err_pid*
+
+# Local-only. We publish straight from this directory now instead of copying
+# a filtered subset into D:\github, so these are excluded here instead.
+.claude/
+.orchestrator_history
+CLAUDE.md
+build-apk.bat
+design.md
+go.bat
+install.bat
+publish-to-github.bat
+release.bat
+todo.txt
