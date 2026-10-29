@@ -17,13 +17,22 @@ android {
         // Bump BOTH on every release -- see CLAUDE.md. versionCode must strictly
         // increase or Android refuses the upgrade. Mapping so far:
         //   1 = 0.7.0, 2 = 0.7.1, 3 = 0.7.2 (never published), 4 = 0.8.0,
-        //   5 = 0.9.0 (never published), 6 = 0.9.1
-        versionCode = 6
-        versionName = "0.9.1"
+        //   5 = 0.9.0 (never published), 6 = 0.9.1, 7 = 0.9.2
+        versionCode = 7
+        versionName = "0.9.2"
+    }
+
+    // F-Droid: no Google-encrypted dependency list in the APK signing block (F-Droid's
+    // scanner rejects it, and it cannot be verified).
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     buildTypes {
         release {
+            // No VCS metadata file in the APK, so F-Droid's build of a tag can match ours.
+            vcsInfo.include = false
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

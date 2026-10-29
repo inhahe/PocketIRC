@@ -1,0 +1,21 @@
+A small, fast, modern IRC client for Android phones and tablets, written in Kotlin with Jetpack Compose and Material 3.
+
+Features:
+
+• Multi-network with auto-reconnect, per-server token-bucket rate limiting
+• App-wide default identity (nicks, real name, username) with per-network overrides
+• SASL PLAIN, server PASS, IRCv3 message-tags, MONITOR / ISON notify list
+• IRCv3 echo-message: messages you send from another device or client show up here too, without your own messages appearing twice
+• Mention, PM, and notice system notifications with inline reply — respond directly from the notification without opening the app — plus notify-list online/offline notifications
+• /alert and /on -d hook notifications routed through any number of user-defined notification channels, each with configurable sound, vibration, lights, and badge
+• Tablet/landscape persistent split layout (server tree + chat + nick list)
+• Searchable, exportable per-buffer history
+• Channel info screen with mode flags, ban / except / invite / quiet lists
+• /list channel browser, /who, /whois reply routing back to the originating buffer
+• /on event hooks (chanmsg, privmsg, join, part, quit, kick, nick, etc.) with nick mask, channel, network, and text-pattern filters and {var} / $var substitution. Supports -d (notification), -s (sound), -x (suppress default), -p (persist across restarts).
+• Editable startup script run at app launch
+• mIRC color and formatting input via long-press send / leading icon
+• IPv4/IPv6 family pinning per endpoint with custom TLS hostname verification
+• No analytics, no tracking, no Google Play Services
+
+Pre-1.0: usable, but on-disk formats may shift between releases.
