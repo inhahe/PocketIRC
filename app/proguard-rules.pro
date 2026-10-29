@@ -26,6 +26,14 @@
 -keepclassmembers class com.pocketirc.app.** {
     @net.engio.mbassy.listener.Handler <methods>;
 }
+# KICL's own listeners (PING, joins, nick and mode tracking...) are @Handler methods
+# too, reached only through MBassador's reflection, so R8 would remove them as unused
+# and the client would stop tracking the server. Keep both libraries whole, as Netty.
+-keep class org.kitteh.irc.** { *; }
+-keep class net.engio.mbassy.** { *; }
+# MBassador's optional expression-language filters need javax.el, which Android does
+# not have and nothing here uses.
+-dontwarn javax.el.**
 
 # Netty (transitive via KICL) uses reflective access for some channel handlers.
 -dontwarn io.netty.**
