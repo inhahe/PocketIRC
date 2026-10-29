@@ -3,14 +3,14 @@ Categories:
   - Messaging
 License: MIT
 AuthorName: Pocket IRC contributors
-SourceCode: https://github.com/inhahe/pocketirc
-IssueTracker: https://github.com/inhahe/pocketirc/issues
-Changelog: https://github.com/inhahe/pocketirc/releases
+SourceCode: https://github.com/inhahe/PocketIRC
+IssueTracker: https://github.com/inhahe/PocketIRC/issues
+Changelog: https://github.com/inhahe/PocketIRC/releases
 
 AutoName: Pocket IRC
 
 RepoType: git
-Repo: https://github.com/inhahe/pocketirc.git
+Repo: https://github.com/inhahe/PocketIRC.git
 
 Builds:
   - versionName: 0.9.2
