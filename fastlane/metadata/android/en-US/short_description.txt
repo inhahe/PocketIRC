@@ -1,1 +1,1 @@
-Modern IRC client for Android
+Modern IRC client with IRCv3, SASL, notification replies and a tablet layout
